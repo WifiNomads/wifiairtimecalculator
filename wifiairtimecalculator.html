@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Airtime Calculator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f8f9fa; }
+        .container { max-width: 900px; }
+        .card { box-shadow: 0 4px 8px rgba(0,0,0,0.1); position: relative; }
+        #barChart { background-color: #ffffff; border-radius: 5px; padding: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .error { color: #dc3545; font-weight: bold; }
+        .correction { color: #28a745; font-weight: bold; }
+        .logo {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            opacity: 1.0;
+            filter: brightness(1.1) contrast(1.1);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border: 2px solid rgba(255,255,255,0.8);
+            z-index: 1000;
+        }
+        .logo:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.4), 0 0 15px rgba(13, 110, 253, 0.6);
+            border: 2px solid rgba(13, 110, 253, 1);
+            filter: brightness(1.2) contrast(1.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="card p-4">
+            <a href="https://www.linkedin.com/company/wi-fi-nomads/" target="_blank" rel="noopener noreferrer">
+                <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiA-xsHIXATnNwKK4pqoWKc4fiMHjJj62UNf4DpuPp9WP_IKbqdlQckYSg17JhQIodZt7Wyy6qkWRniQfQIB57CHO1El5K67xQ4G6G1XTQprrqw_Zr3rZbflhVJ0uehVupFzQyLqeFydLKap6K7f4e2r6Pzp2uXehGBOvNFULR7q_o0t5l4hR4dgXXbaZI/w1684-h1069-p-k-no-nu/Wi-Fi%20Nomads%20Logo.png" alt="Wi-Fi Nomads Logo" class="logo">
+            </a>
+            <h1 class="text-center mb-4">WiFi Airtime Calculator</h1>
+            
+            <label for="scenario" class="form-label">Scenario:</label>
+            <select id="scenario" class="form-select" onchange="updateForm()" title="Select WiFi PHY mode: Legacy OFDM (802.11a/g), HT/VHT (802.11n/ac), HE SU (802.11ax), or HE MU-OFDMA (802.11ax multi-user)">
+                <option value="1">Scenario 1: OFDM (non-HT)</option>
+                <option value="2">Scenario 2: HT or VHT</option>
+                <option value="3">Scenario 3: HE (OFDMA disabled)</option>
+                <option value="4">Scenario 4: DL OFDMA</option>
+            </select>
+            
+            <label for="band" class="form-label">Band:</label>
+            <select id="band" class="form-select" onchange="updateForm()" title="Select frequency band. 2.4 GHz supports up to 40 MHz bandwidth, 5 GHz supports up to 160 MHz bandwidth">
+                <option value="5">5 GHz</option>
+                <option value="2.4">2.4 GHz</option>
+            </select>
+            
+            <div id="inputs">
+                <label class="form-label">Channel Bandwidth (MHz):</label>
+                <select id="bandwidth" class="form-select" onchange="updateUsersOptions()" title="Select channel bandwidth. Higher bandwidth provides more subcarriers and higher data rates. 2.4 GHz supports up to 40 MHz, 5 GHz supports up to 160 MHz">
+                    <option value="20">20</option>
+                    <option value="40">40</option>
+                    <option value="80">80</option>
+                    <option value="160">160</option>
+                </select>
+                
+                <label class="form-label">Access Category:</label>
+                <select id="ac" class="form-select" onchange="updateCWRange()" title="Select traffic priority category. VO (Voice) has highest priority with shortest wait times, BE (Best Effort) is default for data traffic, BK (Background) has lowest priority">
+                    <option value="DIFS" selected>DIFS (AIFSN=2)</option>
+                    <option value="BK">BK (AIFSN=7)</option>
+                    <option value="BE">BE (AIFSN=3)</option>
+                    <option value="VI">VI (AIFSN=2)</option>
+                    <option value="VO">VO (AIFSN=2)</option>
+                </select>
+                
+                <label class="form-label">Contention Window (average slots):</label>
+                <input type="number" id="cw" class="form-control" value="8" min="0" step="0.5" title="Average number of backoff slots before transmission. Lower values = less delay but higher collision probability. Range depends on Access Category (VO: 1.5-3.5, VI: 3.5-7.5, BE/BK: 7.5-511.5)">
+                
+                <label class="form-label">Spatial Streams:</label>
+                <input type="number" id="ss" class="form-control" value="1" min="1" max="8" title="Number of MIMO spatial streams (1-8). More streams = higher data rate. Typical values: 1x1, 2x2, 4x4, 8x8 antenna configurations">
+                
+                <label class="form-label">Guard Interval (us):</label>
+                <input type="number" id="gi" class="form-control" value="0.4" step="0.4" min="0.4" max="0.8" title="Guard interval between OFDM symbols to prevent interference. Legacy: 0.8μs, HT/VHT: 0.4μs or 0.8μs, HE: 0.8μs, 1.6μs, or 3.2μs. Shorter GI = higher efficiency">
+                
+                <label class="form-label">Control Frame Rate:</label>
+                <select id="controlFrameRate" class="form-select" title="Data rate for RTS/CTS/ACK control frames. Lower rates = more reliable but slower. Higher rates = faster but require better signal conditions. Must be from basic rate set">
+                    <option value="6">6 Mbps (BPSK 1/2)</option>
+                    <option value="9">9 Mbps (BPSK 3/4)</option>
+                    <option value="12">12 Mbps (QPSK 1/2)</option>
+                    <option value="18">18 Mbps (QPSK 3/4)</option>
+                    <option value="24">24 Mbps (16-QAM 1/2)</option>
+                    <option value="36">36 Mbps (16-QAM 3/4)</option>
+                    <option value="48">48 Mbps (64-QAM 2/3)</option>
+                    <option value="54">54 Mbps (64-QAM 3/4)</option>
+                </select>
+                
+                <label id="mcsLabel" class="form-label">MCS:</label>
+                <select id="mcs" class="form-select" title="Modulation and Coding Scheme defines data rate. Higher MCS = higher data rate but requires better signal quality. MCS 0-7: Standard rates, MCS 8-9: 256-QAM (VHT/HE), MCS 10-11: 1024-QAM (HE only)"></select>
+                
+                <label id="legacyRateLabel" class="form-label" style="display:none;">Legacy Data Rate:</label>
+                <select id="legacyRate" class="form-select" style="display:none;" title="Select data rate for legacy OFDM (802.11a/g). Higher rates require better signal conditions. Common rates: 6 Mbps (most reliable), 24 Mbps (balanced), 54 Mbps (maximum)"></select>
+                
+                <label class="form-label">A-MPDU bytes:</label>
+                <input type="number" id="ampdu" class="form-control" value="1500" min="1" title="Size of Aggregated MAC Protocol Data Unit in bytes. Larger A-MPDU improves efficiency but increases error impact. Typical: 64-65535 bytes. Common values: 1500 (single packet), 4000-8000 (good efficiency)">
+                
+                <div class="form-check">
+                    <input type="checkbox" id="protection" class="form-check-input" checked title="Enable RTS/CTS handshake to prevent collisions from hidden nodes. Adds overhead but improves reliability in dense environments">
+                    <label class="form-check-label" for="protection" title="Enable RTS/CTS handshake to prevent collisions from hidden nodes. Adds overhead but improves reliability in dense environments">RTS/CTS Protection</label>
+                </div>
+                
+                <label id="usersLabel" class="form-label" style="display:none;">Users:</label>
+                <select id="users" class="form-select" style="display:none;" title="Number of users (stations) in MU-OFDMA transmission. More users = better spectrum efficiency but requires coordination overhead. Limited by bandwidth and resource unit allocation"></select>
+            </div>
+            
+            <button onclick="calculate()" class="btn btn-primary w-100 mt-3">Calculate</button>
+            
+            <div id="output" class="mt-4"></div>
+            
+            <h2 class="mt-5 text-center">Airtime Bar Graph</h2>
+            <canvas id="barChart" class="mt-3"></canvas>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // IEEE 802.11 Standards Compliant Implementation
+        
+        const mcsOptions = [
+            {value: 0, text: 'mcs0 (BPSK 1/2)'},
+            {value: 1, text: 'mcs1 (QPSK 1/2)'},
+            {value: 2, text: 'mcs2 (QPSK 3/4)'},
+            {value: 3, text: 'mcs3 (16-QAM 1/2)'},
+            {value: 4, text: 'mcs4 (16-QAM 3/4)'},
+            {value: 5, text: 'mcs5 (64-QAM 2/3)'},
+            {value: 6, text: 'mcs6 (64-QAM 3/4)'},
+            {value: 7, text: 'mcs7 (64-QAM 5/6)'},
+            {value: 8, text: 'mcs8 (256-QAM 3/4)'},
+            {value: 9, text: 'mcs9 (256-QAM 5/6)'},
+            {value: 10, text: 'mcs10 (1024-QAM 3/4)'},
+            {value: 11, text: 'mcs11 (1024-QAM 5/6)'}
+        ];
+
+        const legacyOptions = [
+            {text: '6 Mbps (BPSK 1/2)', bits:1, coding:0.5},
+            {text: '9 Mbps (BPSK 3/4)', bits:1, coding:0.75},
+            {text: '12 Mbps (QPSK 1/2)', bits:2, coding:0.5},
+            {text: '18 Mbps (QPSK 3/4)', bits:2, coding:0.75},
+            {text: '24 Mbps (16-QAM 1/2)', bits:4, coding:0.5},
+            {text: '36 Mbps (16-QAM 3/4)', bits:4, coding:0.75},
+            {text: '48 Mbps (64-QAM 2/3)', bits:6, coding:2/3},
+            {text: '54 Mbps (64-QAM 3/4)', bits:6, coding:0.75}
+        ];
+
+        // IEEE 802.11ax OFDMA Resource Units (corrected)
+        const ofdma_map = {
+            20: {
+                1: {data_sub:234, bits_sigb:20},  // Corrected HE-SIG-B bits
+                2: {data_sub:117, bits_sigb:40},  // Corrected subcarriers per RU
+                4: {data_sub:52, bits_sigb:80},
+                9: {data_sub:26, bits_sigb:180}
+            },
+            40: {
+                1: {data_sub:468, bits_sigb:20},
+                2: {data_sub:234, bits_sigb:40},
+                4: {data_sub:117, bits_sigb:80},
+                8: {data_sub:52, bits_sigb:160},
+                18: {data_sub:26, bits_sigb:360}
+            },
+            80: {
+                1: {data_sub:980, bits_sigb:20},
+                2: {data_sub:490, bits_sigb:40},
+                4: {data_sub:245, bits_sigb:80},
+                8: {data_sub:117, bits_sigb:160},
+                16: {data_sub:52, bits_sigb:320},
+                37: {data_sub:26, bits_sigb:740}
+            },
+            160: {
+                1: {data_sub:1960, bits_sigb:20},
+                2: {data_sub:980, bits_sigb:40},
+                4: {data_sub:490, bits_sigb:80},
+                8: {data_sub:245, bits_sigb:160},
+                16: {data_sub:117, bits_sigb:320},
+                32: {data_sub:52, bits_sigb:640},
+                74: {data_sub:26, bits_sigb:1480}
+            }
+        };
+
+        function updateMCSOptions(maxMcs, selected) {
+            const mcsSelect = document.getElementById('mcs');
+            mcsSelect.innerHTML = '';
+            for (let i = 0; i <= maxMcs; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.text = mcsOptions[i].text;
+                if (i === selected) option.selected = true;
+                mcsSelect.appendChild(option);
+            }
+        }
+
+        function updateLegacyOptions(selected) {
+            const legacyRate = document.getElementById('legacyRate');
+            legacyRate.innerHTML = '';
+            legacyOptions.forEach((opt, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.text = opt.text;
+                if (index === selected) option.selected = true;
+                legacyRate.appendChild(option);
+            });
+        }
+
+        function updateUsersOptions() {
+            const bandwidth = document.getElementById('bandwidth').value;
+            const users = document.getElementById('users');
+            users.innerHTML = '';
+            const options = Object.keys(ofdma_map[bandwidth]).sort((a,b) => a-b);
+            options.forEach(u => {
+                const option = document.createElement('option');
+                option.value = u;
+                option.text = u;
+                users.appendChild(option);
+            });
+            users.value = options[1] || 1;
+        }
+
+        function updateCWRange() {
+            const ac = document.getElementById('ac').value;
+            const cw = document.getElementById('cw');
+            let minAvg, maxAvg, defaultVal;
+            if (ac === 'VO') {
+                minAvg = 1.5; maxAvg = 3.5; defaultVal = 2.5;
+            } else if (ac === 'VI') {
+                minAvg = 3.5; maxAvg = 7.5; defaultVal = 5.5;
+            } else if (ac === 'BE' || ac === 'BK' || ac === 'DIFS') {
+                minAvg = 7.5; maxAvg = 511.5; defaultVal = 15.5;
+            }
+            cw.min = minAvg;
+            cw.max = maxAvg;
+            cw.value = defaultVal;
+        }
+
+        function updateForm() {
+            const scenario = document.getElementById('scenario').value;
+            const band = document.getElementById('band').value;
+            const gi = document.getElementById('gi');
+            const ss = document.getElementById('ss');
+            const usersLabel = document.getElementById('usersLabel');
+            const users = document.getElementById('users');
+            const ac = document.getElementById('ac');
+            const bandwidth = document.getElementById('bandwidth');
+            const mcsLabel = document.getElementById('mcsLabel');
+            const mcs = document.getElementById('mcs');
+            const legacyRateLabel = document.getElementById('legacyRateLabel');
+            const legacyRate = document.getElementById('legacyRate');
+
+            if (scenario === '4') {
+                usersLabel.style.display = 'block';
+                users.style.display = 'block';
+                updateUsersOptions();
+                gi.value = 1.6;
+                gi.min = 0.8;
+                gi.max = 3.2;
+                gi.step = 0.8;
+                gi.disabled = false;
+                ss.disabled = false;
+                bandwidth.disabled = false;
+                mcsLabel.style.display = 'block';
+                mcs.style.display = 'block';
+                legacyRateLabel.style.display = 'none';
+                legacyRate.style.display = 'none';
+            } else if (scenario === '3') {
+                usersLabel.style.display = 'none';
+                users.style.display = 'none';
+                gi.value = 0.8;
+                gi.min = 0.8;
+                gi.max = 3.2;
+                gi.step = 0.8;
+                gi.disabled = false;
+                ss.disabled = false;
+                bandwidth.disabled = false;
+                mcsLabel.style.display = 'block';
+                mcs.style.display = 'block';
+                legacyRateLabel.style.display = 'none';
+                legacyRate.style.display = 'none';
+            } else if (scenario === '1') {
+                usersLabel.style.display = 'none';
+                users.style.display = 'none';
+                gi.value = 0.8;
+                gi.disabled = true;
+                ss.value = 1;
+                ss.disabled = true;
+                bandwidth.value = 20;
+                bandwidth.disabled = true;
+                mcsLabel.style.display = 'none';
+                mcs.style.display = 'none';
+                legacyRateLabel.style.display = 'block';
+                legacyRate.style.display = 'block';
+            } else {
+                usersLabel.style.display = 'none';
+                users.style.display = 'none';
+                gi.min = 0.4;
+                gi.max = 0.8;
+                gi.step = 0.4;
+                gi.disabled = false;
+                ss.disabled = false;
+                bandwidth.disabled = false;
+                mcsLabel.style.display = 'block';
+                mcs.style.display = 'block';
+                legacyRateLabel.style.display = 'none';
+                legacyRate.style.display = 'none';
+            }
+
+            // Band-specific bandwidth limitations
+            if (band === '2.4') {
+                const bwOptions = ['20', '40'];
+                bandwidth.innerHTML = '';
+                bwOptions.forEach(bw => {
+                    const option = document.createElement('option');
+                    option.value = bw;
+                    option.text = bw;
+                    bandwidth.appendChild(option);
+                });
+                if (parseInt(bandwidth.value) > 40) bandwidth.value = '40';
+            } else {
+                const bwOptions = ['20', '40', '80', '160'];
+                bandwidth.innerHTML = '';
+                bwOptions.forEach(bw => {
+                    const option = document.createElement('option');
+                    option.value = bw;
+                    option.text = bw;
+                    bandwidth.appendChild(option);
+                });
+            }
+
+            updateCWRange();
+            
+            // CORRECTED: MCS availability per scenario
+            let maxMcs;
+            if (scenario === '2') {
+                maxMcs = 9; // HT/VHT: No 1024-QAM
+            } else {
+                maxMcs = 11; // HE: Includes 1024-QAM
+            }
+            let defaultMcs = Math.min(7, maxMcs);
+            if (scenario !== '1') updateMCSOptions(maxMcs, defaultMcs);
+            if (scenario === '1') updateLegacyOptions(0);
+            if (scenario === '4') updateUsersOptions();
+        }
+
+        updateForm();
+
+        function getMcsParams(mcs) {
+            const params = [
+                {bits: 1, coding: 0.5},    // mcs0
+                {bits: 2, coding: 0.5},    // mcs1
+                {bits: 2, coding: 0.75},   // mcs2
+                {bits: 4, coding: 0.5},    // mcs3
+                {bits: 4, coding: 0.75},   // mcs4
+                {bits: 6, coding: 2/3},    // mcs5
+                {bits: 6, coding: 0.75},   // mcs6
+                {bits: 6, coding: 5/6},    // mcs7
+                {bits: 8, coding: 0.75},   // mcs8
+                {bits: 8, coding: 5/6},    // mcs9
+                {bits: 10, coding: 0.75},  // mcs10
+                {bits: 10, coding: 5/6}    // mcs11
+            ];
+            return params[mcs];
+        }
+
+        // CORRECTED: Control frame rate selection based on user input
+        function getControlRate(selectedRate) {
+            const controlRateMap = {
+                6: {bits: 1, coding: 0.5},     // BPSK 1/2
+                9: {bits: 1, coding: 0.75},    // BPSK 3/4
+                12: {bits: 2, coding: 0.5},    // QPSK 1/2
+                18: {bits: 2, coding: 0.75},   // QPSK 3/4
+                24: {bits: 4, coding: 0.5},    // 16-QAM 1/2
+                36: {bits: 4, coding: 0.75},   // 16-QAM 3/4
+                48: {bits: 6, coding: 2/3},    // 64-QAM 2/3
+                54: {bits: 6, coding: 0.75}    // 64-QAM 3/4
+            };
+            
+            const params = controlRateMap[selectedRate];
+            const bits_per_symbol = 52 * params.bits * params.coding; // 52 subcarriers for 20MHz
+            const symbol_time = 4; // Legacy OFDM symbol time
+            
+            return {bits_per_symbol: bits_per_symbol, symbol_time: symbol_time};
+        }
+
+        function calculate() {
+            const scenario = document.getElementById('scenario').value;
+            const band = document.getElementById('band').value;
+            const ac_type = document.getElementById('ac').value;
+            
+            let aifsn;
+            if (ac_type === 'DIFS') aifsn = 2;
+            else if (ac_type === 'BK') aifsn = 7;
+            else if (ac_type === 'BE') aifsn = 3;
+            else if (ac_type === 'VI') aifsn = 2;
+            else if (ac_type === 'VO') aifsn = 2;
+            
+            const cw = parseFloat(document.getElementById('cw').value);
+            const ss = parseInt(document.getElementById('ss').value);
+            const gi = parseFloat(document.getElementById('gi').value);
+            const ampdu = parseFloat(document.getElementById('ampdu').value);
+            const protection = document.getElementById('protection').checked;
+            const users = parseInt(document.getElementById('users').value) || 1;
+            const bandwidth = parseInt(document.getElementById('bandwidth').value);
+            const controlFrameRate = parseInt(document.getElementById('controlFrameRate').value);
+
+            let bits_pr_sub, coding;
+            if (scenario === '1') {
+                const legacyIndex = parseInt(document.getElementById('legacyRate').value);
+                const legacyParams = legacyOptions[legacyIndex];
+                bits_pr_sub = legacyParams.bits;
+                coding = legacyParams.coding;
+            } else {
+                const mcs = parseInt(document.getElementById('mcs').value);
+                const mcsParams = getMcsParams(mcs);
+                bits_pr_sub = mcsParams.bits;
+                coding = mcsParams.coding;
+            }
+
+            // IEEE timing parameters
+            const sifs = (band === '2.4') ? 10 : 16;
+            const slot = 9;
+            const lp = 20; // L-STF(8) + L-LTF(8) + L-SIG(4)
+            const legacy_symbol = 4;
+            
+            // CORRECTED: Control frame calculations using user-selected rate
+            const controlRate = getControlRate(controlFrameRate);
+
+            let aifs = sifs + aifsn * slot;
+            let backoff = cw * slot;
+
+            // Control frames with corrected rates
+            const rts_length = 20;
+            let databits_rts = rts_length * 8 + 16 + 6; // SERVICE + DATA + TAIL
+            let symbols_rts = Math.ceil(databits_rts / controlRate.bits_per_symbol);
+            let duration_rts = symbols_rts * controlRate.symbol_time;
+
+            const cts_length = 14;
+            let databits_cts = cts_length * 8 + 16 + 6;
+            let symbols_cts = Math.ceil(databits_cts / controlRate.bits_per_symbol);
+            let duration_cts = symbols_cts * controlRate.symbol_time;
+
+            const b_ack_length = 34;
+            let databits_b_ack = b_ack_length * 8 + 16 + 6;
+
+            // CORRECTED: Preamble calculations
+            let preamble_duration;
+            if (scenario === '1') {
+                preamble_duration = lp; // Legacy only
+            } else if (scenario === '2') {
+                // CORRECTED: HT/VHT preamble = Legacy + HT-SIG/VHT-SIG-A + HT-STF + HT-LTF
+                const ht_sig = 8; // HT-SIG: 8μs or VHT-SIG-A: 8μs
+                const ht_stf = 4; // HT-STF: 4μs
+                const ht_ltf = 4 * ss; // HT-LTF: 4μs per spatial stream
+                preamble_duration = lp + ht_sig + ht_stf + ht_ltf;
+            } else {
+                // CORRECTED: HE preamble calculation
+                const rl_sig = 4; // RL-SIG: 4μs
+                const he_sig_a = 8; // HE-SIG-A: 8μs
+                let he_sig_b = 0;
+                let he_stf = 4; // HE-STF: 4μs  
+                let he_ltf = 6.4 * ss; // HE-LTF: 6.4μs per spatial stream
+                
+                if (scenario === '4') {
+                    const params = ofdma_map[bandwidth][users];
+                    const sigb_bits_per_symbol = 26; // MCS0 for HE-SIG-B
+                    let symbols_sigb = Math.ceil(params.bits_sigb / sigb_bits_per_symbol);
+                    he_sig_b = symbols_sigb * 4; // Each HE-SIG-B symbol is 4μs
+                }
+                
+                preamble_duration = lp + rl_sig + he_sig_a + he_sig_b + he_stf + he_ltf;
+            }
+
+            // Data transmission calculation
+            let data_sub, symbol_time, data_bits_per_symbol, databits_data, symbols_data, duration_data;
+
+            const subcarriers_non_he = {20: 52, 40: 108, 80: 234, 160: 468};
+            const subcarriers_he = {20: 234, 40: 468, 80: 980, 160: 1960};
+
+            if (scenario === '1' || scenario === '2') {
+                data_sub = subcarriers_non_he[bandwidth];
+                symbol_time = 3.2 + gi;
+            } else {
+                if (scenario === '4') {
+                    const params = ofdma_map[bandwidth][users];
+                    data_sub = params.data_sub;
+                } else {
+                    data_sub = subcarriers_he[bandwidth];
+                }
+                symbol_time = 12.8 + gi;
+            }
+
+            data_bits_per_symbol = data_sub * bits_pr_sub * coding * ss;
+            
+            // CORRECTED: Service field and tail bits
+            databits_data = 16 + ampdu * 8 + 6; // SERVICE(16) + DATA + TAIL(6)
+            
+            symbols_data = Math.ceil(databits_data / data_bits_per_symbol);
+            duration_data = symbols_data * symbol_time;
+
+            // ACK calculation
+            let symbols_b_ack, duration_b_ack;
+            if (scenario === '4' && users > 1) {
+                let control_bits_per_symbol_he = data_sub * 1 * 0.5; // MCS0 in RU
+                symbols_b_ack = Math.ceil(databits_b_ack / control_bits_per_symbol_he);
+                duration_b_ack = symbols_b_ack * (12.8 + gi);
+            } else {
+                symbols_b_ack = Math.ceil(databits_b_ack / controlRate.bits_per_symbol);
+                duration_b_ack = symbols_b_ack * controlRate.symbol_time;
+            }
+
+            // Build timing breakdown
+            let barLabels = [];
+            let barData = [];
+            let total_inc = 0;
+            let total_exc = 0;
+
+            // AIFS and backoff
+            barLabels.push('DIFS/AIFS');
+            barData.push(aifs);
+            total_inc += aifs;
+
+            barLabels.push('Backoff');
+            barData.push(backoff);
+            total_inc += backoff;
+
+            // Protection
+            if (protection) {
+                barLabels.push('RTS Preamble');
+                barData.push(lp);
+                total_inc += lp;
+                total_exc += lp;
+
+                barLabels.push('RTS');
+                barData.push(duration_rts);
+                total_inc += duration_rts;
+                total_exc += duration_rts;
+
+                barLabels.push('SIFS');
+                barData.push(sifs);
+                total_inc += sifs;
+                total_exc += sifs;
+
+                barLabels.push('CTS Preamble');
+                barData.push(lp);
+                total_inc += lp;
+                total_exc += lp;
+
+                barLabels.push('CTS');
+                barData.push(duration_cts);
+                total_inc += duration_cts;
+                total_exc += duration_cts;
+
+                barLabels.push('SIFS');
+                barData.push(sifs);
+                total_inc += sifs;
+                total_exc += sifs;
+            }
+
+            // Data transmission
+            barLabels.push('Data Preamble');
+            barData.push(preamble_duration);
+            total_inc += preamble_duration;
+            total_exc += preamble_duration;
+
+            barLabels.push('A-MPDU');
+            barData.push(duration_data);
+            total_inc += duration_data;
+            total_exc += duration_data;
+
+            barLabels.push('SIFS');
+            barData.push(sifs);
+            total_inc += sifs;
+            total_exc += sifs;
+
+            barLabels.push('ACK Preamble');
+            barData.push(lp);
+            total_inc += lp;
+            total_exc += lp;
+
+            barLabels.push('ACK/B-ACK');
+            barData.push(duration_b_ack);
+            total_inc += duration_b_ack;
+            total_exc += duration_b_ack;
+
+            // Throughput calculation
+            const throughput_inc = (ampdu * 8 / (total_inc * 1e-6)) / 1e6;
+            const throughput_exc = (ampdu * 8 / (total_exc * 1e-6)) / 1e6;
+
+            // Output results
+            let table = '<table class="table table-striped"><thead><tr><th>Component</th><th>Duration (us)</th><th>Throughput (Mbps)</th></tr></thead><tbody>';
+            table += `<tr><td>Duration including DIFS & CW</td><td>${total_inc.toFixed(1)}</td><td>${throughput_inc.toFixed(3)}</td></tr>`;
+            table += `<tr><td>Duration excluding DIFS & CW</td><td>${total_exc.toFixed(1)}</td><td>${throughput_exc.toFixed(3)}</td></tr>`;
+            table += '</tbody></table>';
+            document.getElementById('output').innerHTML = table;
+
+            // Bar chart
+            const ctx = document.getElementById('barChart').getContext('2d');
+            if (window.myChart) window.myChart.destroy();
+            window.myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: barLabels,
+                    datasets: [{
+                        label: 'Duration (us)',
+                        data: barData,
+                        backgroundColor: 'rgba(13, 110, 253, 0.2)',
+                        borderColor: 'rgba(13, 110, 253, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    scales: {
+                        x: { beginAtZero: true }
+                    },
+                    animation: {
+                        duration: 1500,
+                        easing: 'easeOutBounce'
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
